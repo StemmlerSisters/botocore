@@ -10,3 +10,4 @@ pytest-cov==4.1.0
 pytest-xdist==3.3.1
 atomicwrites>=1.0 # Windows requirement
 colorama>0.3.0 # Windows requirement
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
