@@ -14,15 +14,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
         os: [ubuntu-latest, macOS-latest, windows-latest]
 
     steps:
-      - uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
       - name: 'Set up Python ${{ matrix.python-version }}'
-        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: '${{ matrix.python-version }}'
+          cache: 'pip'
+          allow-prereleases: true
       - name: Install dependencies and CRT
         run: |
           python scripts/ci/install --extras crt
