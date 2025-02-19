@@ -115,10 +115,10 @@ class TestHMACV1(unittest.TestCase):
             'object-lock',
         )
         for operation in operations:
-            url = '/quotes?%s' % operation
+            url = f'/quotes?{operation}'
             split = urlsplit(url)
             cr = self.hmacv1.canonical_resource(split)
-            self.assertEqual(cr, '/quotes?%s' % operation)
+            self.assertEqual(cr, f'/quotes?{operation}')
 
     def test_sign_with_token(self):
         credentials = botocore.credentials.Credentials(
@@ -357,7 +357,7 @@ class TestS3SigV4Auth(BaseTestWithFixedDate):
     def test_query_string_params_in_urls(self):
         if not hasattr(self.AuthClass, 'canonical_query_string'):
             raise unittest.SkipTest(
-                '%s does not expose interim steps' % self.AuthClass.__name__
+                f'{self.AuthClass.__name__} does not expose interim steps'
             )
 
         request = AWSRequest()
@@ -374,7 +374,7 @@ class TestS3SigV4Auth(BaseTestWithFixedDate):
         cqs = self.auth.canonical_query_string(request)
         self.assertEqual('marker=%C3%A4%C3%B6%C3%BC-01.txt&prefix=', cqs)
 
-    def _test_blacklist_header(self, header, value):
+    def _test_blocklist_header(self, header, value):
         request = AWSRequest()
         request.url = 'https://s3.amazonaws.com/bucket/foo'
         request.method = 'PUT'
@@ -386,16 +386,19 @@ class TestS3SigV4Auth(BaseTestWithFixedDate):
         auth.add_auth(request)
         self.assertNotIn(header, request.headers['Authorization'])
 
-    def test_blacklist_expect_headers(self):
-        self._test_blacklist_header('expect', '100-continue')
+    def test_blocklist_expect_headers(self):
+        self._test_blocklist_header('expect', '100-continue')
 
-    def test_blacklist_trace_id(self):
-        self._test_blacklist_header(
+    def test_blocklist_trace_id(self):
+        self._test_blocklist_header(
             'x-amzn-trace-id', 'Root=foo;Parent=bar;Sampleid=1'
         )
 
-    def test_blacklist_headers(self):
-        self._test_blacklist_header('user-agent', 'botocore/1.4.11')
+    def test_blocklist_user_agent_header(self):
+        self._test_blocklist_header('user-agent', 'botocore/1.4.11')
+
+    def test_blocklist_transfer_encoding_header(self):
+        self._test_blocklist_header('transfer-encoding', 'chunked')
 
     def test_uses_sha256_if_config_value_is_true(self):
         self.client_config.s3['payload_signing_enabled'] = True
@@ -704,9 +707,7 @@ class TestS3SigV2Presign(BasePresignTest):
         self.request = AWSRequest()
         self.bucket = 'mybucket'
         self.key = 'myobject'
-        self.path = 'https://s3.amazonaws.com/{}/{}'.format(
-            self.bucket, self.key
-        )
+        self.path = f'https://s3.amazonaws.com/{self.bucket}/{self.key}'
         self.request.url = self.path
         self.request.method = 'GET'
 
@@ -986,9 +987,9 @@ class TestSigV4Presign(BasePresignTest):
         request = AWSRequest()
         request.method = 'GET'
         request.url = 'https://myservice.us-east-1.amazonaws.com/'
-        request.headers[
-            'Content-Type'
-        ] = 'application/x-www-form-urlencoded; charset=utf-8'
+        request.headers['Content-Type'] = (
+            'application/x-www-form-urlencoded; charset=utf-8'
+        )
         self.auth.add_auth(request)
         query_string = self.get_parsed_query_string(request)
         signed_headers = query_string.get('X-Amz-SignedHeaders')
@@ -1022,7 +1023,7 @@ class BaseS3PresignPostTest(unittest.TestCase):
         }
 
         self.request = AWSRequest()
-        self.request.url = 'https://s3.amazonaws.com/%s' % self.bucket
+        self.request.url = f'https://s3.amazonaws.com/{self.bucket}'
         self.request.method = 'POST'
 
         self.request.context['s3-presign-post-fields'] = self.fields
@@ -1075,7 +1076,7 @@ class TestS3SigV2Post(BaseS3PresignPostTest):
 
     def test_empty_fields_and_policy(self):
         self.request = AWSRequest()
-        self.request.url = 'https://s3.amazonaws.com/%s' % self.bucket
+        self.request.url = f'https://s3.amazonaws.com/{self.bucket}'
         self.request.method = 'POST'
         self.auth.add_auth(self.request)
 
@@ -1152,7 +1153,7 @@ class TestS3SigV4Post(BaseS3PresignPostTest):
 
     def test_empty_fields_and_policy(self):
         self.request = AWSRequest()
-        self.request.url = 'https://s3.amazonaws.com/%s' % self.bucket
+        self.request.url = f'https://s3.amazonaws.com/{self.bucket}'
         self.request.method = 'POST'
         self.auth.add_auth(self.request)
 

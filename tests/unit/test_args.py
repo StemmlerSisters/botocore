@@ -14,19 +14,24 @@
 import socket
 
 from botocore import args, exceptions
+from botocore.args import PRIORITY_ORDERED_SUPPORTED_PROTOCOLS
 from botocore.client import ClientEndpointBridge
 from botocore.config import Config
 from botocore.configprovider import ConfigValueStore
+from botocore.exceptions import UnsupportedServiceProtocolsError
 from botocore.hooks import HierarchicalEmitter
 from botocore.model import ServiceModel
+from botocore.parsers import PROTOCOL_PARSERS
+from botocore.serialize import SERIALIZERS
 from botocore.useragent import UserAgentString
-from tests import mock, unittest
+from tests import get_botocore_default_config_mapping, mock, unittest
 
 
 class TestCreateClientArgs(unittest.TestCase):
     def setUp(self):
         self.event_emitter = mock.Mock(HierarchicalEmitter)
-        self.config_store = ConfigValueStore()
+        default_config_mapping = get_botocore_default_config_mapping()
+        self.config_store = ConfigValueStore(mapping=default_config_mapping)
         user_agent_creator = UserAgentString(
             platform_name=None,
             platform_version=None,
@@ -62,9 +67,12 @@ class TestCreateClientArgs(unittest.TestCase):
         service_model = mock.Mock(ServiceModel)
         service_model.service_name = service_name
         service_model.endpoint_prefix = service_name
+        service_model.protocol = 'query'
+        service_model.protocols = ['query']
         service_model.metadata = {
             'serviceFullName': 'MyService',
             'protocol': 'query',
+            'protocols': ['query'],
         }
         service_model.operation_names = []
         return service_model
@@ -104,6 +112,19 @@ class TestCreateClientArgs(unittest.TestCase):
         }
         call_kwargs.update(**override_kwargs)
         return self.args_create.get_client_args(**call_kwargs)
+
+    def call_compute_client_args(self, **override_kwargs):
+        call_kwargs = {
+            'service_model': self.service_model,
+            'client_config': None,
+            'endpoint_bridge': self.bridge,
+            'region_name': self.region,
+            'is_secure': True,
+            'endpoint_url': self.endpoint_url,
+            'scoped_config': {},
+        }
+        call_kwargs.update(**override_kwargs)
+        return self.args_create.compute_client_args(**call_kwargs)
 
     def assert_create_endpoint_call(self, mock_endpoint, **override_kwargs):
         call_kwargs = {
@@ -186,7 +207,7 @@ class TestCreateClientArgs(unittest.TestCase):
             {
                 'region_name': 'us-west-2',
                 'signature_version': 's3v4',
-                'enpoint_url': 'https://s3-us-west-2.amazonaws.com',
+                'endpoint_url': 'https://s3-us-west-2.amazonaws.com',
                 'signing_name': 's3',
                 'signing_region': 'us-west-2',
                 'metadata': {},
@@ -614,6 +635,89 @@ class TestCreateClientArgs(unittest.TestCase):
         config = client_args['client_config']
         self.assertFalse(config.disable_request_compression)
 
+    def test_checksum_default_client_config(self):
+        input_config = Config()
+        client_args = self.call_get_client_args(client_config=input_config)
+        config = client_args["client_config"]
+        self.assertEqual(config.request_checksum_calculation, "when_supported")
+        self.assertEqual(config.response_checksum_validation, "when_supported")
+
+    def test_checksum_client_config(self):
+        input_config = Config(
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+        )
+        client_args = self.call_get_client_args(client_config=input_config)
+        config = client_args['client_config']
+        self.assertEqual(config.request_checksum_calculation, "when_required")
+        self.assertEqual(config.response_checksum_validation, "when_required")
+
+    def test_checksum_config_store(self):
+        self.config_store.set_config_variable(
+            "request_checksum_calculation", "when_required"
+        )
+        self.config_store.set_config_variable(
+            "response_checksum_validation", "when_required"
+        )
+        config = self.call_get_client_args()['client_config']
+        self.assertEqual(config.request_checksum_calculation, "when_required")
+        self.assertEqual(config.response_checksum_validation, "when_required")
+
+    def test_checksum_client_config_overrides_config_store(self):
+        self.config_store.set_config_variable(
+            "request_checksum_calculation", "when_supported"
+        )
+        self.config_store.set_config_variable(
+            "response_checksum_validation", "when_supported"
+        )
+        input_config = Config(
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+        )
+        client_args = self.call_get_client_args(client_config=input_config)
+        config = client_args['client_config']
+        self.assertEqual(config.request_checksum_calculation, "when_required")
+        self.assertEqual(config.response_checksum_validation, "when_required")
+
+    def test_request_checksum_calculation_invalid_client_config(self):
+        with self.assertRaises(exceptions.InvalidChecksumConfigError):
+            config = Config(request_checksum_calculation="invalid_config")
+            self.call_get_client_args(client_config=config)
+        self.config_store.set_config_variable(
+            'request_checksum_calculation', "invalid_config"
+        )
+        with self.assertRaises(exceptions.InvalidChecksumConfigError):
+            self.call_get_client_args()
+
+    def test_response_checksum_validation_invalid_client_config(self):
+        with self.assertRaises(exceptions.InvalidChecksumConfigError):
+            config = Config(response_checksum_validation="invalid_config")
+            self.call_get_client_args(client_config=config)
+        self.config_store.set_config_variable(
+            'response_checksum_validation', "invalid_config"
+        )
+        with self.assertRaises(exceptions.InvalidChecksumConfigError):
+            self.call_get_client_args()
+
+    def test_protocol_resolution_without_protocols_trait(self):
+        del self.service_model.protocols
+        del self.service_model.metadata['protocols']
+        client_args = self.call_compute_client_args()
+        self.assertEqual(client_args['protocol'], 'query')
+
+    def test_protocol_resolution_picks_highest_supported(self):
+        self.service_model.protocol = 'query'
+        self.service_model.protocols = ['query', 'json']
+        client_args = self.call_compute_client_args()
+        self.assertEqual(client_args['protocol'], 'json')
+
+    def test_protocol_raises_error_for_unsupported_protocol(self):
+        self.service_model.protocols = ['wrongprotocol']
+        with self.assertRaisesRegex(
+            UnsupportedServiceProtocolsError, self.service_model.service_name
+        ):
+            self.call_compute_client_args()
+
 
 class TestEndpointResolverBuiltins(unittest.TestCase):
     def setUp(self):
@@ -842,3 +946,21 @@ class TestEndpointResolverBuiltins(unittest.TestCase):
             legacy_endpoint_url='https://my.legacy.endpoint.com',
         )
         self.assertEqual(bins['SDK::Endpoint'], None)
+
+
+class TestProtocolPriorityList:
+    def test_all_parsers_accounted_for(self):
+        assert set(PRIORITY_ORDERED_SUPPORTED_PROTOCOLS) == set(
+            PROTOCOL_PARSERS.keys()
+        ), (
+            "The map of protocol names to parsers is out of sync with the priority "
+            "ordered list of protocols supported by botocore"
+        )
+
+    def test_all_serializers_accounted_for(self):
+        assert set(PRIORITY_ORDERED_SUPPORTED_PROTOCOLS) == set(
+            SERIALIZERS.keys()
+        ), (
+            "The map of protocol names to serializers is out of sync with the "
+            "priority ordered list of protocols supported by botocore"
+        )

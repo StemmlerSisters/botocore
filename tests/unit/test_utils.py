@@ -285,6 +285,45 @@ class TestTransformName(unittest.TestCase):
         self.assertEqual(
             xform_name('sourceServerIDs', '-'), 'source-server-ids'
         )
+        self.assertEqual(
+            xform_name('AssociateWhatsAppBusinessAccount', '-'),
+            'associate-whatsapp-business-account',
+        )
+        self.assertEqual(
+            xform_name('DeleteWhatsAppMessageMedia', '-'),
+            'delete-whatsapp-media-message',
+        )
+        self.assertEqual(
+            xform_name('DisassociateWhatsAppBusinessAccount', '-'),
+            'disassociate-whatsapp-business-account',
+        )
+        self.assertEqual(
+            xform_name('GetLinkedWhatsAppBusinessAccount', '-'),
+            'get-linked-whatsapp-business-account',
+        )
+        self.assertEqual(
+            xform_name('GetLinkedWhatsAppBusinessAccountPhoneNumber', '-'),
+            'get-linked-whatsapp-business-account-phone-number',
+        )
+        self.assertEqual(
+            xform_name('GetWhatsAppMessageMedia', '-'),
+            'get-whatsapp-message-media',
+        )
+        self.assertEqual(
+            xform_name('ListLinkedWhatsAppBusinessAccounts', '-'),
+            'list-linked-whatsapp-business-accounts',
+        )
+        self.assertEqual(
+            xform_name('PostWhatsAppMessageMedia', '-'),
+            'post-whatsapp-message-media',
+        )
+        self.assertEqual(
+            xform_name('PutWhatsAppBusinessAccountEventDestinations', '-'),
+            'put-whatsapp-business-account-event-destinations',
+        )
+        self.assertEqual(
+            xform_name('SendWhatsAppMessage', '-'), 'send-whatsapp-message'
+        )
 
     def test_special_case_ends_with_s(self):
         self.assertEqual(xform_name('GatewayARNs', '-'), 'gateway-arns')
@@ -1308,25 +1347,25 @@ class TestGetServiceModuleName(unittest.TestCase):
         )
 
     def test_client_name_with_amazon(self):
-        self.service_description['metadata'][
-            'serviceFullName'
-        ] = 'Amazon MyService'
+        self.service_description['metadata']['serviceFullName'] = (
+            'Amazon MyService'
+        )
         self.assertEqual(
             get_service_module_name(self.service_model), 'MyService'
         )
 
     def test_client_name_using_abreviation(self):
-        self.service_description['metadata'][
-            'serviceAbbreviation'
-        ] = 'Abbreviation'
+        self.service_description['metadata']['serviceAbbreviation'] = (
+            'Abbreviation'
+        )
         self.assertEqual(
             get_service_module_name(self.service_model), 'Abbreviation'
         )
 
     def test_client_name_with_non_alphabet_characters(self):
-        self.service_description['metadata'][
-            'serviceFullName'
-        ] = 'Amazon My-Service'
+        self.service_description['metadata']['serviceFullName'] = (
+            'Amazon My-Service'
+        )
         self.assertEqual(
             get_service_module_name(self.service_model), 'MyService'
         )
@@ -1840,6 +1879,66 @@ class TestS3RegionRedirector(unittest.TestCase):
         )
         self.assertIsNone(redirect_response)
 
+    def test_redirects_on_illegal_location_constraint_from_opt_in_region(self):
+        request_dict = {
+            'url': 'https://il-central-1.amazonaws.com/foo',
+            'context': {
+                's3_redirect': {
+                    'bucket': 'foo',
+                    'redirected': False,
+                    'params': {'Bucket': 'foo'},
+                },
+                'signing': {},
+            },
+        }
+        response = (
+            None,
+            {
+                'Error': {'Code': 'IllegalLocationConstraintException'},
+                'ResponseMetadata': {
+                    'HTTPHeaders': {'x-amz-bucket-region': 'eu-central-1'}
+                },
+            },
+        )
+
+        self.operation.name = 'GetObject'
+        redirect_response = self.redirector.redirect_from_error(
+            request_dict, response, self.operation
+        )
+        self.assertEqual(redirect_response, 0)
+
+    def test_no_redirect_on_illegal_location_constraint_from_bad_location_constraint(
+        self,
+    ):
+        request_dict = {
+            'url': 'https://us-west-2.amazonaws.com/foo',
+            'context': {
+                's3_redirect': {
+                    'bucket': 'foo',
+                    'redirected': False,
+                    'params': {
+                        'Bucket': 'foo',
+                        'CreateBucketConfiguration': {
+                            'LocationConstraint': 'eu-west-2',
+                        },
+                    },
+                },
+                'signing': {},
+            },
+        }
+        response = (
+            None,
+            {
+                'Error': {'Code': 'IllegalLocationConstraintException'},
+            },
+        )
+
+        self.operation.name = 'CreateBucket'
+        redirect_response = self.redirector.redirect_from_error(
+            request_dict, response, self.operation
+        )
+        self.assertIsNone(redirect_response)
+
     def test_get_region_from_response(self):
         response = (
             None,
@@ -2199,9 +2298,9 @@ class TestS3EndpointSetter(unittest.TestCase):
         if bucket:
             url += bucket
         if key:
-            url += '/%s' % key
+            url += f'/{key}'
         if querystring:
-            url += '?%s' % querystring
+            url += f'?{querystring}'
         return AWSRequest(method='GET', headers={}, url=url)
 
     def get_s3_outpost_request(self, **s3_request_kwargs):
@@ -2268,65 +2367,60 @@ class TestS3EndpointSetter(unittest.TestCase):
     def test_outpost_endpoint(self):
         request = self.get_s3_outpost_request()
         self.call_set_endpoint(self.endpoint_setter, request=request)
-        expected_url = 'https://{}-{}.{}.s3-outposts.{}.amazonaws.com/'.format(
-            self.accesspoint_name,
-            self.account,
-            self.outpost_name,
-            self.region_name,
+        outpost_prefix = (
+            f'{self.accesspoint_name}-{self.account}.{self.outpost_name}'
         )
+        dns_suffix = f'{self.region_name}.amazonaws.com'
+        expected_url = f'https://{outpost_prefix}.s3-outposts.{dns_suffix}/'
         self.assertEqual(request.url, expected_url)
 
     def test_outpost_endpoint_preserves_key_in_path(self):
         request = self.get_s3_outpost_request(key=self.key)
         self.call_set_endpoint(self.endpoint_setter, request=request)
+        outpost_prefix = (
+            f'{self.accesspoint_name}-{self.account}.{self.outpost_name}'
+        )
+        dns_suffix = f'{self.region_name}.amazonaws.com'
         expected_url = (
-            'https://{}-{}.{}.s3-outposts.{}.amazonaws.com/{}'.format(
-                self.accesspoint_name,
-                self.account,
-                self.outpost_name,
-                self.region_name,
-                self.key,
-            )
+            f'https://{outpost_prefix}.s3-outposts.{dns_suffix}/{self.key}'
         )
         self.assertEqual(request.url, expected_url)
 
     def test_accesspoint_endpoint(self):
         request = self.get_s3_accesspoint_request()
         self.call_set_endpoint(self.endpoint_setter, request=request)
-        expected_url = 'https://{}-{}.s3-accesspoint.{}.amazonaws.com/'.format(
-            self.accesspoint_name, self.account, self.region_name
+        accesspoint_prefix = f'{self.accesspoint_name}-{self.account}'
+        dns_suffix = f'{self.region_name}.amazonaws.com'
+        expected_url = (
+            f'https://{accesspoint_prefix}.s3-accesspoint.{dns_suffix}/'
         )
         self.assertEqual(request.url, expected_url)
 
     def test_accesspoint_preserves_key_in_path(self):
         request = self.get_s3_accesspoint_request(key=self.key)
         self.call_set_endpoint(self.endpoint_setter, request=request)
-        expected_url = (
-            'https://{}-{}.s3-accesspoint.{}.amazonaws.com/{}'.format(
-                self.accesspoint_name, self.account, self.region_name, self.key
-            )
-        )
+        accesspoint_prefix = f'{self.accesspoint_name}-{self.account}'
+        dns_suffix = f'{self.region_name}.amazonaws.com'
+        expected_url = f'https://{accesspoint_prefix}.s3-accesspoint.{dns_suffix}/{self.key}'
         self.assertEqual(request.url, expected_url)
 
     def test_accesspoint_preserves_scheme(self):
         request = self.get_s3_accesspoint_request(scheme='http://')
         self.call_set_endpoint(self.endpoint_setter, request=request)
-        expected_url = 'http://{}-{}.s3-accesspoint.{}.amazonaws.com/'.format(
-            self.accesspoint_name,
-            self.account,
-            self.region_name,
+        accesspoint_prefix = f'{self.accesspoint_name}-{self.account}'
+        dns_suffix = f'{self.region_name}.amazonaws.com'
+        expected_url = (
+            f'http://{accesspoint_prefix}.s3-accesspoint.{dns_suffix}/'
         )
         self.assertEqual(request.url, expected_url)
 
     def test_accesspoint_preserves_query_string(self):
         request = self.get_s3_accesspoint_request(querystring='acl')
         self.call_set_endpoint(self.endpoint_setter, request=request)
+        accesspoint_prefix = f'{self.accesspoint_name}-{self.account}'
+        dns_suffix = f'{self.region_name}.amazonaws.com'
         expected_url = (
-            'https://{}-{}.s3-accesspoint.{}.amazonaws.com/?acl'.format(
-                self.accesspoint_name,
-                self.account,
-                self.region_name,
-            )
+            f'https://{accesspoint_prefix}.s3-accesspoint.{dns_suffix}/?acl'
         )
         self.assertEqual(request.url, expected_url)
 
@@ -2336,10 +2430,10 @@ class TestS3EndpointSetter(unittest.TestCase):
         }
         request = self.get_s3_accesspoint_request()
         self.call_set_endpoint(self.endpoint_setter, request=request)
-        expected_url = 'https://{}-{}.s3-accesspoint.{}.mysuffix.com/'.format(
-            self.accesspoint_name,
-            self.account,
-            self.region_name,
+        accesspoint_prefix = f'{self.accesspoint_name}-{self.account}'
+        dns_suffix = f'{self.region_name}.mysuffix.com'
+        expected_url = (
+            f'https://{accesspoint_prefix}.s3-accesspoint.{dns_suffix}/'
         )
         self.assertEqual(request.url, expected_url)
 
@@ -2350,10 +2444,10 @@ class TestS3EndpointSetter(unittest.TestCase):
         )
         request = self.get_s3_accesspoint_request()
         self.call_set_endpoint(self.endpoint_setter, request=request)
-        expected_url = 'https://{}-{}.s3-accesspoint.{}.amazonaws.com/'.format(
-            self.accesspoint_name,
-            self.account,
-            client_region,
+        accesspoint_prefix = f'{self.accesspoint_name}-{self.account}'
+        dns_suffix = f'{client_region}.amazonaws.com'
+        expected_url = (
+            f'https://{accesspoint_prefix}.s3-accesspoint.{dns_suffix}/'
         )
         self.assertEqual(request.url, expected_url)
 
@@ -2363,9 +2457,8 @@ class TestS3EndpointSetter(unittest.TestCase):
         )
         request = self.get_s3_accesspoint_request()
         self.call_set_endpoint(endpoint_setter, request=request)
-        expected_url = 'https://{}-{}.custom.com/'.format(
-            self.accesspoint_name,
-            self.account,
+        expected_url = (
+            f'https://{self.accesspoint_name}-{self.account}.custom.com/'
         )
         self.assertEqual(request.url, expected_url)
 
@@ -2395,8 +2488,8 @@ class TestS3EndpointSetter(unittest.TestCase):
         )
         request = self.get_s3_request(self.bucket, self.key)
         self.call_set_endpoint(endpoint_setter, request)
-        expected_url = 'https://{}.s3.us-west-2.amazonaws.com/{}'.format(
-            self.bucket, self.key
+        expected_url = (
+            f'https://{self.bucket}.s3.us-west-2.amazonaws.com/{self.key}'
         )
         self.assertEqual(request.url, expected_url)
 
@@ -2406,8 +2499,8 @@ class TestS3EndpointSetter(unittest.TestCase):
         )
         request = self.get_s3_request(self.bucket, self.key)
         self.call_set_endpoint(endpoint_setter, request)
-        expected_url = 'https://{}.s3.us-west-2.amazonaws.com/{}'.format(
-            self.bucket, self.key
+        expected_url = (
+            f'https://{self.bucket}.s3.us-west-2.amazonaws.com/{self.key}'
         )
         self.assertEqual(request.url, expected_url)
 
@@ -2417,8 +2510,8 @@ class TestS3EndpointSetter(unittest.TestCase):
         )
         request = self.get_s3_request(self.bucket, self.key)
         self.call_set_endpoint(endpoint_setter, request)
-        expected_url = 'https://s3.us-west-2.amazonaws.com/{}/{}'.format(
-            self.bucket, self.key
+        expected_url = (
+            f'https://s3.us-west-2.amazonaws.com/{self.bucket}/{self.key}'
         )
         self.assertEqual(request.url, expected_url)
 
@@ -2428,8 +2521,8 @@ class TestS3EndpointSetter(unittest.TestCase):
         )
         request = self.get_s3_request(self.bucket, self.key)
         self.call_set_endpoint(endpoint_setter, request)
-        expected_url = 'https://{}.s3-accelerate.amazonaws.com/{}'.format(
-            self.bucket, self.key
+        expected_url = (
+            f'https://{self.bucket}.s3-accelerate.amazonaws.com/{self.key}'
         )
         self.assertEqual(request.url, expected_url)
 
