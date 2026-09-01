@@ -2,3 +2,4 @@ sphinx==7.4.7
 furo==2024.08.06
 sphinx_copybutton==0.5.1
 sphinx-remove-toctrees==0.0.3
+idna>=3.15 # not directly required, pinned by Snyk to avoid a vulnerability
